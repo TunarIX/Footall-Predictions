@@ -29,6 +29,9 @@ def add_implied_probabilities(df: pd.DataFrame, bookmaker: str = "Market Avg") -
     """Add normalized implied probability columns for the selected bookmaker odds."""
     data = df.copy()
     h_col, d_col, a_col = BOOKMAKERS.get(bookmaker, BOOKMAKERS["Market Avg"])
+    for col in (h_col, d_col, a_col):
+        if col not in data.columns:
+            data[col] = pd.NA
     probs = data[[h_col, d_col, a_col]].apply(lambda row: odds_to_probabilities(*row), axis=1, result_type="expand")
     probs.columns = PROB_COLS
     return pd.concat([data, probs], axis=1)
