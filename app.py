@@ -357,14 +357,14 @@ else:
     if is_international_competition(selected_competition):
         st.write("Uses `data/processed/international_matches.csv` and `data/upcoming/international_fixtures.csv`. FIFA World Cup is filtered from the shared international rows.")
     else:
-        st.write("Automatically uses `data/processed/historical_matches.csv` and `data/upcoming/upcoming_fixtures.csv`. Fixture odds are API-first: The Odds API is primary, optional API-Football can provide fallback fixtures, and manual CSV upload remains available.")
-    st.info("Manual upcoming fixtures CSV columns: Date, Time, Competition, HomeTeam, AwayTeam, HomeOdds, DrawOdds, AwayOdds, Over25Odds, Under25Odds, OddsSource")
+        st.write("Automatically uses `data/processed/historical_matches.csv` and `data/upcoming/upcoming_fixtures.csv`. Fixture imports use local/manual CSV adapters by default; optional API adapters can be enabled separately when keys are configured.")
+    st.info("No API key required. For World Cup predictions, place fixtures/odds in data/raw/worldcup_2026_fixtures.csv or upload the CSV. Manual CSV columns: Date, Time, Competition, HomeTeam, AwayTeam, HomeOdds, DrawOdds, AwayOdds, Over25Odds, Under25Odds, OddsSource")
     upcoming_preview, upcoming_path, fixture_warning = load_upcoming_fixtures_for_competition(selected_competition)
     st.caption(f"Upcoming fixtures loaded: {len(upcoming_preview):,}")
     if upcoming_path.exists():
         st.caption(f"Last upcoming update: {pd.Timestamp(upcoming_path.stat().st_mtime, unit='s').strftime('%Y-%m-%d %H:%M:%S')}")
     if upcoming_preview.empty:
-        st.warning(fixture_warning or "Set ODDS_API_KEY in .env or use manual CSV fallback. Manual columns: Date, Time, Competition, HomeTeam, AwayTeam, HomeOdds, DrawOdds, AwayOdds, Over25Odds, Under25Odds, OddsSource.")
+        st.warning(fixture_warning or "No API key required. For World Cup predictions, place fixtures/odds in data/raw/worldcup_2026_fixtures.csv or upload the CSV. Manual columns: Date, Time, Competition, HomeTeam, AwayTeam, HomeOdds, DrawOdds, AwayOdds, Over25Odds, Under25Odds, OddsSource.")
     else:
         odds_available = upcoming_preview[["HomeOdds", "DrawOdds", "AwayOdds"]].notna().all(axis=1).sum()
         st.caption(f"Upcoming odds source availability: {odds_available:,}/{len(upcoming_preview):,} fixtures with full odds")
