@@ -61,7 +61,7 @@ def read_csv_url(url: str) -> pd.DataFrame:
     """Read a CSV URL and return an empty frame when it is unavailable."""
     try:
         return pd.read_csv(url, encoding_errors="ignore")
-    except (HTTPError, URLError, TimeoutError, ValueError, pd.errors.ParserError):
+    except (HTTPError, URLError, TimeoutError, ValueError, pd.errors.EmptyDataError, pd.errors.ParserError):
         return pd.DataFrame()
 
 

@@ -10,8 +10,10 @@ import pandas as pd
 import streamlit as st
 
 from src.competitions import competitions_table, load_competitions
-from src.data_loader import load_uploaded_files
-from scripts.data_sources import normalize_upcoming_frame
+from src.data_loader import load_uploaded_files, safe_read_csv
+from scripts.data_sources import UPCOMING_COLUMNS, normalize_upcoming_frame
+from scripts.predict_next_48h import PREDICTION_COLUMNS
+from src.preprocessing import EXPECTED_COLUMNS
 from src.features import team_statistics
 from src.odds import (
     BOOKMAKERS,
@@ -90,27 +92,30 @@ try:
         data = load_uploaded_files(uploads, comp.get("data_source", "football-data.co.uk"))
         data_source_note = "manual upload"
     elif historical_path.exists():
-        data = pd.read_csv(historical_path, parse_dates=["Date"])
+        data = safe_read_csv(historical_path, EXPECTED_COLUMNS, parse_dates=["Date"])
         data_source_note = str(historical_path)
     else:
-        st.info(
-            "Upload one or more CSV files or click 'Update historical data' to download configured football-data.co.uk league CSVs."
-        )
-        st.subheader("Configured competitions")
-        st.dataframe(competitions_table(), use_container_width=True, hide_index=True)
-        st.stop()
-    data = add_implied_probabilities(data, bookmaker)
+        data = pd.DataFrame(columns=EXPECTED_COLUMNS)
+        data_source_note = "missing historical data"
+    data = add_implied_probabilities(data, bookmaker) if not data.empty else data
 except Exception as exc:
     st.error(f"Could not load match data: {exc}")
+    data = pd.DataFrame(columns=EXPECTED_COLUMNS)
+    data_source_note = "unavailable historical data"
+
+if data.empty and page != "Next 48 Hours Predictions":
+    st.warning("Please click Update historical data first or upload CSV files manually.")
+    st.subheader("Configured competitions")
+    st.dataframe(competitions_table(), use_container_width=True, hide_index=True)
     st.stop()
 
-if data.empty:
-    st.warning("No valid historical match rows were found after cleaning.")
-    st.stop()
-
-teams = sorted(set(data["HomeTeam"].dropna()) | set(data["AwayTeam"].dropna()))
+teams = sorted(set(data.get("HomeTeam", pd.Series(dtype=object)).dropna()) | set(data.get("AwayTeam", pd.Series(dtype=object)).dropna()))
 st.sidebar.success(f"Loaded {len(data):,} matches and {len(teams):,} teams")
 st.sidebar.caption(f"Historical data: {data_source_note}")
+if historical_path.exists():
+    st.sidebar.caption(f"Last historical update: {pd.Timestamp(historical_path.stat().st_mtime, unit='s').strftime('%Y-%m-%d %H:%M:%S')}")
+odds_rows = data[["ImpHome", "ImpDraw", "ImpAway"]].dropna().shape[0] if {"ImpHome", "ImpDraw", "ImpAway"}.issubset(data.columns) else 0
+st.sidebar.caption(f"Selected odds source availability: {odds_rows:,} rows")
 st.sidebar.caption(
     f"Source: {comp.get('data_source')} · type: {comp.get('match_type')}"
 )
@@ -189,6 +194,9 @@ elif page == "Upcoming prediction":
         "Predictions combine leak-free recent form, goal difference, scoring reliability, venue/rest effects, neutral-site and World Cup context, Elo ratings, calibrated bookmaker context, and similar historical matches."
     )
     model, training_data = train_baseline_model(data)
+    if not teams:
+        st.warning("No teams are available in the loaded dataset. Please update historical data or upload CSV files manually.")
+        st.stop()
     if model is None:
         st.warning(
             "At least 30 feature-ready historical matches with valid odds are needed to train the multi-feature baseline model."
@@ -197,7 +205,11 @@ elif page == "Upcoming prediction":
         st.stop()
     c1, c2 = st.columns(2)
     home_team = c1.selectbox("Home team", teams)
-    away_team = c2.selectbox("Away team", [team for team in teams if team != home_team])
+    away_options = [team for team in teams if team != home_team]
+    if not away_options:
+        st.warning("Selected teams are missing from the dataset or there are not enough teams to compare.")
+        st.stop()
+    away_team = c2.selectbox("Away team", away_options)
     c3, c4, c5 = st.columns(3)
     home_odds = c3.number_input(
         "Current home odds", min_value=1.01, value=2.10, step=0.05
@@ -335,9 +347,20 @@ elif page == "Backtesting":
 else:
     st.subheader("Next 48 Hours Predictions")
     st.write("Automatically uses `data/processed/historical_matches.csv` and `data/upcoming/upcoming_fixtures.csv`. Fixture odds keep their visible source; football-data.co.uk market averages are preferred, then Bet365.")
+    st.info("Manual upcoming fixtures CSV columns: Date, Time, Competition, HomeTeam, AwayTeam, HomeOdds, DrawOdds, AwayOdds, OddsSource")
+    upcoming_path = Path("data/upcoming/upcoming_fixtures.csv")
+    upcoming_preview = normalize_upcoming_frame(safe_read_csv(upcoming_path, UPCOMING_COLUMNS))
+    st.caption(f"Upcoming fixtures loaded: {len(upcoming_preview):,}")
+    if upcoming_path.exists():
+        st.caption(f"Last upcoming update: {pd.Timestamp(upcoming_path.stat().st_mtime, unit='s').strftime('%Y-%m-%d %H:%M:%S')}")
+    if upcoming_preview.empty:
+        st.warning("No upcoming fixtures are available. Upload a manual CSV with columns: Date, Time, Competition, HomeTeam, AwayTeam, HomeOdds, DrawOdds, AwayOdds, OddsSource.")
+    else:
+        odds_available = upcoming_preview[["HomeOdds", "DrawOdds", "AwayOdds"]].notna().all(axis=1).sum()
+        st.caption(f"Upcoming odds source availability: {odds_available:,}/{len(upcoming_preview):,} fixtures with full odds")
     manual_upcoming = st.file_uploader("Manual upcoming fixtures CSV fallback", type="csv", key="manual_upcoming")
     if manual_upcoming is not None:
-        manual = normalize_upcoming_frame(pd.read_csv(manual_upcoming, encoding_errors="ignore"))
+        manual = normalize_upcoming_frame(safe_read_csv(manual_upcoming, UPCOMING_COLUMNS))
         Path("data/upcoming").mkdir(parents=True, exist_ok=True)
         manual.to_csv("data/upcoming/upcoming_fixtures.csv", index=False)
         st.success(f"Saved {len(manual):,} manual upcoming fixtures.")
@@ -353,9 +376,10 @@ else:
     if not predictions_path.exists():
         st.info("No generated predictions yet. Update fixtures, then generate next 48h predictions.")
     else:
-        predictions = pd.read_csv(predictions_path)
+        predictions = safe_read_csv(predictions_path, PREDICTION_COLUMNS)
         if predictions.empty:
-            st.warning("No fixtures found in the next 48 hours.")
+            st.warning("No next-48h predictions available. Upcoming fixtures may be missing or no matches are scheduled in the next 48 hours.")
+            st.info("Manual fallback: upload a CSV with columns Date, Time, Competition, HomeTeam, AwayTeam, HomeOdds, DrawOdds, AwayOdds, OddsSource, then click Generate next 48h predictions.")
         else:
             st.dataframe(
                 predictions.style.format(
