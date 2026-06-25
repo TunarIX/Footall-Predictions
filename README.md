@@ -164,16 +164,94 @@ The app recognizes common football-data.co.uk columns including:
 
 International files can include columns such as `date`, `home_team`, `away_team`, `home_score`, `away_score`, `tournament`, `country`, `neutral`, and optional odds columns `home_odds`, `draw_odds`, `away_odds`. The loader maps these to the app's canonical format and derives `FTR` from the score when needed.
 
-## Run locally
+## Local Ubuntu setup and workflow
+
+This project can run entirely on a local Ubuntu machine. No deployment, container, or cloud service is required.
+
+### Prerequisites
+
+Install Python 3 with virtual-environment support:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-streamlit run app.py
+sudo apt update
+sudo apt install -y python3 python3-venv python3-pip
 ```
 
-Then open the local Streamlit URL shown in your terminal.
+The project does not require secrets or API keys for the current local workflow. Optional local shell overrides are documented in `.env.example`.
+
+### 1. Setup
+
+Create a virtual environment and install Python dependencies with one command:
+
+```bash
+bash scripts/setup_local.sh
+```
+
+The script creates `.venv/`, upgrades `pip`, and installs `requirements.txt`. To use the environment manually after setup, run:
+
+```bash
+source .venv/bin/activate
+```
+
+### 2. Update data
+
+Run the full local update workflow:
+
+```bash
+bash scripts/full_local_update.sh
+```
+
+This runs, in order:
+
+1. `python scripts/update_historical_data.py --start-year 2018`
+2. `python scripts/update_upcoming_fixtures.py`
+3. `python scripts/predict_next_48h.py`
+
+To include a manual upcoming-fixtures CSV fallback, pass the existing updater arguments through the workflow script:
+
+```bash
+bash scripts/full_local_update.sh --manual-csv path/to/manual_upcoming.csv
+```
+
+You can also run the data steps separately:
+
+```bash
+source .venv/bin/activate
+python scripts/update_historical_data.py --start-year 2018
+python scripts/update_upcoming_fixtures.py
+```
+
+### 3. Run dashboard
+
+Start the Streamlit dashboard locally with one command:
+
+```bash
+bash scripts/run_local.sh
+```
+
+If `.venv/` is missing, this script runs `scripts/setup_local.sh` first. Then open the local Streamlit URL shown in your terminal, usually `http://localhost:8501`.
+
+### 4. Run backtest
+
+After historical data exists, run a chronological backtest:
+
+```bash
+source .venv/bin/activate
+python scripts/backtest_model.py --train-until 2024-06-30 --test-from 2024-07-01
+```
+
+Backtest reports are written to `data/reports/`.
+
+### 5. Generate next 48h predictions
+
+After historical data and upcoming fixtures exist, generate the next 48 hours of predictions:
+
+```bash
+source .venv/bin/activate
+python scripts/predict_next_48h.py
+```
+
+Predictions are written to `data/predictions/next_48h_predictions.csv`.
 
 ## Model notes
 
