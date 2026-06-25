@@ -142,6 +142,15 @@ python scripts/update_upcoming_fixtures.py --manual-csv path/to/manual_upcoming.
 
 In Streamlit, use the **Next 48 Hours Predictions** page and upload a manual upcoming fixtures CSV. The upload is normalized to the same upcoming schema, so a future real odds API can be added later without changing the prediction pipeline. This is especially useful for World Cup and international matches where public club-league fixture feeds may not contain coverage.
 
+Manual CSV headers must be exactly:
+
+```csv
+Date,Time,Competition,HomeTeam,AwayTeam,HomeOdds,DrawOdds,AwayOdds,OddsSource
+2026-06-25,20:00,Example League,Home FC,Away FC,2.10,3.30,3.50,Manual
+```
+
+If odds are unavailable, leave `HomeOdds`, `DrawOdds`, and `AwayOdds` blank and set `OddsSource` to `Unavailable`. The local scripts and Streamlit app will keep valid headers even when no automatic fixtures are available, so an empty fixture or prediction file should not crash the app.
+
 ### Next 48 hours predictions
 
 Run:

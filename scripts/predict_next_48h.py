@@ -11,13 +11,30 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.data_sources import normalize_upcoming_frame
+from scripts.data_sources import UPCOMING_COLUMNS, normalize_upcoming_frame
+from src.data_loader import safe_read_csv
 from src.odds import odds_to_probabilities
+from src.preprocessing import EXPECTED_COLUMNS
 from src.predictor import feature_influence_summary, predict_match, similar_historical_matches, train_baseline_model
 
 HISTORICAL = Path("data/processed/historical_matches.csv")
 UPCOMING = Path("data/upcoming/upcoming_fixtures.csv")
 OUTPUT = Path("data/predictions/next_48h_predictions.csv")
+PREDICTION_COLUMNS = [
+    "FixtureDateTime", "Date", "Time", "Competition", "HomeTeam", "AwayTeam",
+    "HomeOdds", "DrawOdds", "AwayOdds", "OddsSource", "HomeWinProbability",
+    "DrawProbability", "AwayWinProbability", "PredictedScore", "ExpectedHomeGoals",
+    "ExpectedAwayGoals", "Top5Scorelines", "ConfidenceScore", "ConfidenceReason",
+    "ValueSignal", "ModelExplanation", "FeatureImportanceSummary", "SimilarHistoricalMatches",
+]
+
+
+def _write_empty_predictions(message: str) -> pd.DataFrame:
+    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+    empty = pd.DataFrame(columns=PREDICTION_COLUMNS)
+    empty.to_csv(OUTPUT, index=False)
+    print(f"{message} Wrote headers only to {OUTPUT}.")
+    return empty
 
 
 def _fixture_datetime(fixtures: pd.DataFrame) -> pd.Series:
@@ -37,24 +54,25 @@ def value_signal(model_prob: float, implied: float | None) -> str:
 
 
 def generate_next_48h_predictions(now: pd.Timestamp | None = None) -> pd.DataFrame:
-    if not HISTORICAL.exists():
-        raise SystemExit(f"Missing {HISTORICAL}; run scripts/update_historical_data.py first.")
-    if not UPCOMING.exists():
-        raise SystemExit(f"Missing {UPCOMING}; run scripts/update_upcoming_fixtures.py first.")
-    historical = pd.read_csv(HISTORICAL, parse_dates=["Date"])
-    upcoming = normalize_upcoming_frame(pd.read_csv(UPCOMING, encoding_errors="ignore"))
+    historical = safe_read_csv(HISTORICAL, EXPECTED_COLUMNS, parse_dates=["Date"])
+    if historical.empty:
+        return _write_empty_predictions(
+            f"Missing or empty {HISTORICAL}; please update historical data before generating predictions."
+        )
+    upcoming = normalize_upcoming_frame(safe_read_csv(UPCOMING, UPCOMING_COLUMNS))
     if upcoming.empty:
-        OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-        empty = pd.DataFrame()
-        empty.to_csv(OUTPUT, index=False)
-        return empty
+        return _write_empty_predictions(
+            "No upcoming fixtures available; run scripts/update_upcoming_fixtures.py or provide a manual CSV."
+        )
     upcoming["FixtureDateTime"] = _fixture_datetime(upcoming)
     now = now or pd.Timestamp.now(tz=None)
     horizon = now + pd.Timedelta(hours=48)
     upcoming = upcoming[(upcoming["FixtureDateTime"] >= now) & (upcoming["FixtureDateTime"] <= horizon)].copy()
+    if upcoming.empty:
+        return _write_empty_predictions("No matches are scheduled in the next 48 hours.")
     model, training = train_baseline_model(historical)
     if model is None:
-        raise SystemExit("Not enough historical rows with odds to train the prediction model.")
+        return _write_empty_predictions("Not enough historical rows with odds to train the prediction model.")
     rows: list[dict] = []
     for _, fixture in upcoming.iterrows():
         implied = odds_to_probabilities(fixture.HomeOdds, fixture.DrawOdds, fixture.AwayOdds)

@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from src.data_loader import safe_read_csv
 from scripts.data_sources import (
     BASE_URL,
     UPCOMING_COLUMNS,
@@ -49,12 +50,18 @@ def update_upcoming_fixtures(manual_csv: str | None = None, output: Path = Path(
     automatic = _football_data_fixtures()
     frames = [automatic] if not automatic.empty else []
     if manual_csv:
-        manual = pd.read_csv(manual_csv, encoding_errors="ignore")
+        manual = safe_read_csv(manual_csv, UPCOMING_COLUMNS)
         frames.append(normalize_upcoming_frame(manual))
         print(f"loaded manual fallback {manual_csv}")
     result = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=UPCOMING_COLUMNS)
     result = result.drop_duplicates(["Date", "Competition", "HomeTeam", "AwayTeam"], keep="first")
+    result = result.reindex(columns=UPCOMING_COLUMNS)
     result.to_csv(output, index=False)
+    if result.empty:
+        print(
+            "No automatic or manual upcoming fixtures were available; "
+            f"created {output} with valid headers for manual fallback."
+        )
     print(f"wrote {len(result):,} rows to {output}")
     return result
 
