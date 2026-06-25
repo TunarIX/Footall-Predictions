@@ -18,6 +18,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.data_sources import UPCOMING_COLUMNS, USER_AGENT, api_football_events, normalize_upcoming_frame, odds_api_events
+from src.fixture_sources.manual_csv import ManualCsvFixtureSource
+from src.fixture_sources.worldcup_static import WorldCupStaticFixtureSource
 from src.data_loader import safe_read_csv
 from src.fixtures import INTERNATIONAL_UPCOMING, write_international_fixtures
 from src.match_context import is_international_competition_name, tournament_category
@@ -92,18 +94,25 @@ def _normalise_source_frame(frame: pd.DataFrame) -> pd.DataFrame:
     return normalized.reindex(columns=[*UPCOMING_COLUMNS, "TournamentCategory"])
 
 
-def download_international_fixtures() -> tuple[pd.DataFrame, list[str]]:
+def download_international_fixtures(include_api: bool = False) -> tuple[pd.DataFrame, list[str]]:
     frames: list[pd.DataFrame] = []
     messages: list[str] = []
-    api_frame, api_messages = odds_api_events(international=True)
-    messages.extend(api_messages)
-    if not api_frame.empty:
-        frames.append(api_frame)
-    if api_frame.empty:
-        fallback_frame, fallback_messages = api_football_events(international=True)
-        messages.extend(fallback_messages)
-        if not fallback_frame.empty:
-            frames.append(fallback_frame)
+
+    worldcup_result = WorldCupStaticFixtureSource().load()
+    messages.extend(worldcup_result.messages)
+    if not worldcup_result.fixtures.empty:
+        frames.append(worldcup_result.fixtures)
+
+    if include_api:
+        api_frame, api_messages = odds_api_events(international=True)
+        messages.extend(api_messages)
+        if not api_frame.empty:
+            frames.append(api_frame)
+        if api_frame.empty:
+            fallback_frame, fallback_messages = api_football_events(international=True)
+            messages.extend(fallback_messages)
+            if not fallback_frame.empty:
+                frames.append(fallback_frame)
 
     for url in _source_urls():
         try:
@@ -122,26 +131,30 @@ def download_international_fixtures() -> tuple[pd.DataFrame, list[str]]:
     return result.sort_values(["Date", "Time", "Competition"]).reset_index(drop=True), messages
 
 
-def read_source(source_csv: str | None = None) -> pd.DataFrame:
+def read_source(source_csv: str | None = None, include_api: bool = False) -> pd.DataFrame:
     if not source_csv:
-        fixtures, _ = download_international_fixtures()
+        fixtures, _ = download_international_fixtures(include_api=include_api)
         return fixtures
-    return safe_read_csv(source_csv, UPCOMING_COLUMNS)
+    return ManualCsvFixtureSource(source_csv).load().fixtures
 
 
 def _valid(fixtures: pd.DataFrame) -> bool:
     return not fixtures.empty and {"Date", "Competition", "HomeTeam", "AwayTeam"}.issubset(fixtures.columns)
 
 
-def update_international_fixtures(source_csv: str | None = None, output: Path = INTERNATIONAL_UPCOMING) -> pd.DataFrame:
+def update_international_fixtures(source_csv: str | None = None, output: Path = INTERNATIONAL_UPCOMING, include_api: bool = False) -> pd.DataFrame:
     existing = safe_read_csv(output, UPCOMING_COLUMNS) if output.exists() else pd.DataFrame(columns=UPCOMING_COLUMNS)
     messages: list[str] = []
     if source_csv:
-        fixtures = safe_read_csv(source_csv, UPCOMING_COLUMNS)
-        messages.append(f"loaded manual fallback {source_csv}")
+        result = ManualCsvFixtureSource(source_csv).load()
+        fixtures = result.fixtures
+        messages.extend(result.messages)
     else:
-        fixtures, messages = download_international_fixtures()
+        fixtures, messages = download_international_fixtures(include_api=include_api)
     normalized = normalize_upcoming_frame(fixtures)
+    if not normalized.empty:
+        dates = pd.to_datetime(normalized["Date"], errors="coerce")
+        normalized = normalized[dates >= pd.Timestamp.today().normalize()].copy()
     if not _valid(normalized):
         for msg in messages:
             print(msg)
@@ -161,8 +174,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-csv", help="Manual international fixtures CSV")
     parser.add_argument("--output", type=Path, default=INTERNATIONAL_UPCOMING)
+    parser.add_argument("--include-api", action="store_true", help="Also try optional API sources when keys are configured")
     args = parser.parse_args()
-    update_international_fixtures(args.source_csv, args.output)
+    update_international_fixtures(args.source_csv, args.output, include_api=args.include_api)
 
 
 if __name__ == "__main__":
