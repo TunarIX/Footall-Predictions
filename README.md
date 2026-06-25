@@ -175,6 +175,18 @@ All national-team competitions share one historical file: `data/processed/intern
 
 International files can include columns such as `date`, `home_team`, `away_team`, `home_score`, `away_score`, `tournament`, `competition`, `country`, `neutral`, and optional odds columns `home_odds`, `draw_odds`, `away_odds`. The loader maps these to the app's canonical format and derives `FTR` from the score when needed. If `data/processed/international_matches.csv` is missing, the app shows a warning and explains that the file should be provided or updated from an international data provider instead of crashing.
 
+Clicking **Update historical data** while **FIFA World Cup** or **International matches** is selected runs `scripts/update_international_data.py`. The updater currently supports the manual source `data/raw/international_matches.csv`; if that file is absent and no automatic source has been configured, it fails with: `Automatic international historical data source is not configured. Add a CSV to data/raw/international_matches.csv or configure an API/source.` The updater validates that the processed file has rows, required columns, parsed dates, and `FTR` values of `H`, `D`, or `A` before writing, so an empty or invalid source will not overwrite a previously valid `data/processed/international_matches.csv`.
+
+Required manual CSV example for `data/raw/international_matches.csv`:
+
+```csv
+date,home_team,away_team,home_score,away_score,tournament,neutral,country
+2022-11-20,Qatar,Ecuador,0,2,FIFA World Cup,True,Qatar
+2022-09-22,France,Austria,2,0,UEFA Nations League,False,France
+```
+
+The processed output is normalized to `Date`, `Competition`, `HomeTeam`, `AwayTeam`, `FTHG`, `FTAG`, `FTR`, `Neutral`, `Country`, and `SourceFile`. World Cup matches should be included in the same raw international CSV with `tournament` or `competition` set to `FIFA World Cup`; the app filters those rows for the FIFA World Cup view.
+
 ### International upcoming fixtures
 
 All national-team upcoming fixtures share one file: `data/upcoming/international_fixtures.csv`. FIFA World Cup fixtures are filtered from this file by `Competition`/`Tournament = FIFA World Cup`; broader **International matches** predictions use all rows. A separate `worldcup_fixtures.csv` is not required.

@@ -11,6 +11,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.data_sources import UPCOMING_COLUMNS, normalize_upcoming_frame
+from scripts.update_international_data import update_international_data
 from src.fixtures import _filter_competition
 from src.predictor import train_baseline_model
 from src.preprocessing import clean_international_match_data
@@ -65,3 +66,53 @@ def test_training_does_not_require_odds() -> None:
     model, training = train_baseline_model(cleaned)
     assert not training.empty
     assert {"ImpHome", "ImpDraw", "ImpAway"}.issubset(training.columns)
+
+
+def test_manual_raw_international_csv_is_processed_into_non_empty_file(tmp_path: Path) -> None:
+    raw = tmp_path / "international_matches.csv"
+    output = tmp_path / "processed_international_matches.csv"
+    raw.write_text(
+        "date,home_team,away_team,home_score,away_score,tournament,neutral,country\n"
+        "2022-11-20,Qatar,Ecuador,0,2,FIFA World Cup,True,Qatar\n"
+        "2022-09-22,France,Austria,2,0,UEFA Nations League,False,France\n"
+    )
+
+    processed = update_international_data(raw, output)
+
+    assert output.exists()
+    assert len(processed) == 2
+    assert {
+        "Date",
+        "Competition",
+        "HomeTeam",
+        "AwayTeam",
+        "FTHG",
+        "FTAG",
+        "FTR",
+        "Neutral",
+        "Country",
+        "SourceFile",
+    }.issubset(processed.columns)
+    assert set(processed["FTR"]) == {"A", "H"}
+
+
+def test_empty_input_does_not_overwrite_valid_processed_file(tmp_path: Path) -> None:
+    raw = tmp_path / "international_matches.csv"
+    output = tmp_path / "processed_international_matches.csv"
+    valid_contents = (
+        "Date,Competition,HomeTeam,AwayTeam,FTHG,FTAG,FTR,Neutral,Country,SourceFile\n"
+        "2022-11-20,FIFA World Cup,Qatar,Ecuador,0,2,A,True,Qatar,seed.csv\n"
+    )
+    output.write_text(valid_contents)
+    raw.write_text("date,home_team,away_team,home_score,away_score,tournament,neutral\n")
+
+    try:
+        update_international_data(raw, output)
+    except SystemExit as exc:  # pragma: no cover - defensive for CLI-like failures
+        assert "validation" in str(exc).lower() or "invalid" in str(exc).lower()
+    except ValueError as exc:
+        assert "rows > 0" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("empty input should fail validation")
+
+    assert output.read_text() == valid_contents

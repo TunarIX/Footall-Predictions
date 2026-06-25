@@ -62,7 +62,8 @@ with st.sidebar:
         {"data_source": "football-data.co.uk"},
     )
     if st.button("Update historical data"):
-        result = subprocess.run(["python", "scripts/update_historical_data.py"], capture_output=True, text=True)
+        update_script = "scripts/update_international_data.py" if is_international_competition(selected_competition) else "scripts/update_historical_data.py"
+        result = subprocess.run(["python", update_script], capture_output=True, text=True)
         if result.returncode == 0:
             st.success("Historical data updated.")
             st.code(result.stdout[-2000:])
